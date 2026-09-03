@@ -3,6 +3,7 @@ export type TokenType =
     | "IDENTIFIER"
     | "COMMA"
     | "NUMBER"
+    | "STRING"
     | "OPERATOR"
     | "EOF";
 
@@ -29,6 +30,24 @@ export function tokenize(input: string): Token[] {
         if (char === ",") {
             tokens.push({ type: "COMMA", value: "," });
             pos++;
+            continue;
+        }
+
+        if (char === "'" || char === '"') {
+            const quoteChar = char;
+            pos++; 
+            const start = pos;
+            while (pos < input.length && input[pos] !== quoteChar) {
+                pos++;
+            }
+            if (pos >= input.length) {
+                throw new Error(
+                    `Unterminated string starting at position ${start - 1}`,
+                );
+            }
+            const word = input.slice(start, pos);
+            pos++; 
+            tokens.push({ type: "STRING", value: word });
             continue;
         }
 
