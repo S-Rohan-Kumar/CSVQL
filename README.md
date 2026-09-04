@@ -116,7 +116,7 @@ These are scoped out intentionally rather than left unfinished — the goal of t
 ## Development
 
 ```bash
-git clone https://github.com/<your-username>/csvql.git
+git clone https://github.com/S-Rohan-Kumar/csvql.git
 cd csvql
 npm install
 npm run build
