@@ -16,7 +16,7 @@ export interface Token {
 }
 
 function isIdentifierChar(char: string): boolean {
-    return /[a-zA-Z0-9./\\_-]/.test(char);
+    return /[a-zA-Z0-9./\\_%-]/.test(char);
 }
 
 export function tokenize(input: string): Token[] {
@@ -91,7 +91,7 @@ export function tokenize(input: string): Token[] {
             continue;
         }
 
-        if (/[a-zA-Z]/.test(char)) {
+        if (/[a-zA-Z%]/.test(char)) {
             let start = pos;
             while (pos < input.length && isIdentifierChar(input[pos])) pos++;
             const word = input.slice(start, pos);
@@ -115,12 +115,13 @@ export function tokenize(input: string): Token[] {
                 upperWord === "DESC" ||
                 upperWord === "COUNT" ||
                 upperWord === "SUM" ||
-                upperWord === "AVG";
+                upperWord === "AVG" ||
+                upperWord === "LIKE";
 
             if (isKeyword) {
                 tokens.push({ type: "KEYWORD", value: upperWord });
             } else {
-                tokens.push({ type: "IDENTIFIER", value: word }); 
+                tokens.push({ type: "IDENTIFIER", value: word });
             }
             continue;
         }

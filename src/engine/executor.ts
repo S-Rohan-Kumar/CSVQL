@@ -5,6 +5,15 @@ import {
     ColumnSelection,
 } from "../parser/parser";
 
+function matchLike(text: string, pattern: string): boolean {
+    if (text === null || text === undefined) return false;
+    const escaped = pattern
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+        .replace(/%/g, ".*")
+        .replace(/_/g, ".");
+    return new RegExp(`^${escaped}$`, "i").test(text);
+}
+
 function evaluateCondition(
     row: Record<string, string>,
     condition: Condition,
@@ -13,6 +22,10 @@ function evaluateCondition(
         const rowVal = row[condition.column];
         const targetVal = condition.value;
         const op = condition.operator;
+
+        if (op === "LIKE") {
+            return matchLike(rowVal, targetVal);
+        }
 
         if (op === ">" || op === "<" || op === "<=" || op === ">=") {
             const numRow = Number(rowVal);
@@ -129,18 +142,23 @@ export function execute(
 
         return result;
     }
+
     const result: Record<string, string>[] = [];
+    const isSelectAll = query.columns.length === 1 && query.columns[0] === "*";
 
     for (let i = 0; i < filteredRows.length; i++) {
         const row = filteredRows[i];
-        const newRow: Record<string, string> = {};
 
-        for (let j = 0; j < query.columns.length; j++) {
-            const col = query.columns[j] as string;
-            newRow[col] = row[col];
+        if (isSelectAll) {
+            result.push({ ...row });
+        } else {
+            const newRow: Record<string, string> = {};
+            for (let j = 0; j < query.columns.length; j++) {
+                const col = query.columns[j] as string;
+                newRow[col] = row[col];
+            }
+            result.push(newRow);
         }
-
-        result.push(newRow);
     }
 
     return result;

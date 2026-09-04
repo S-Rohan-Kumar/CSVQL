@@ -14,6 +14,7 @@ export interface SelectQuery {
     from: string;
     where?: Condition;
     groupBy?: string[];
+    having?: Condition;
 }
 
 export type Condition = SimpleCondition | ComplexCondition;
@@ -71,14 +72,17 @@ class Parser {
 
         while (true) {
             const token = this.peek();
-            if (
+
+            if (this.check("ASTERISK")) {
+                this.expect("ASTERISK");
+                columns.push("*");
+            } else if (
                 token &&
-                token.type === "KEYWORD" &&
                 (token.value === "COUNT" ||
                     token.value === "SUM" ||
                     token.value === "AVG")
             ) {
-                const fn = this.expect("KEYWORD")!.value as
+                const fn = this.tokens[this.pos++].value as
                     | "COUNT"
                     | "SUM"
                     | "AVG";
@@ -127,6 +131,12 @@ class Parser {
             groupBy = [groupCol];
         }
 
+        let having: Condition | undefined = undefined;
+        if (this.check("KEYWORD", "HAVING")) {
+            this.expect("KEYWORD", "HAVING");
+            having = this.parseCondition();
+        }
+
         this.expect("EOF");
         return { type: "SelectQuery", columns, from, where, groupBy };
     }
@@ -152,9 +162,36 @@ class Parser {
     }
 
     private parseSimpleCondition(): SimpleCondition {
-        const columnToken = this.expect("IDENTIFIER");
-        const operatorToken = this.expect("OPERATOR");
-
+        let column: string;
+        const colPeek = this.peek();
+        if (
+            colPeek &&
+            (colPeek.value === "COUNT" ||
+                colPeek.value === "SUM" ||
+                colPeek.value === "AVG")
+        ) {
+            const fn = this.tokens[this.pos++].value;
+            this.expect("LPAREN");
+            let arg: string;
+            if (this.check("ASTERISK")) {
+                arg = this.expect("ASTERISK")!.value;
+            } else {
+                arg = this.expect("IDENTIFIER")!.value;
+            }
+            this.expect("RPAREN");
+            column = `${fn}(${arg})`;
+        } else {
+            const columnToken = this.expect("IDENTIFIER");
+            column = columnToken!.value;
+        }
+        let operator: string;
+        const opPeek = this.peek();
+        if (opPeek && opPeek.type === "KEYWORD" && opPeek.value === "LIKE") {
+            operator = this.tokens[this.pos++].value;
+        } else {
+            const operatorToken = this.expect("OPERATOR");
+            operator = operatorToken!.value;
+        }
         const token = this.peek();
         if (!token) {
             throw new Error("Unexpected end of input in condition");
@@ -169,11 +206,10 @@ class Parser {
             );
         }
         const valueToken = this.tokens[this.pos++];
-
         return {
             type: "SimpleCondition",
-            column: columnToken!.value,
-            operator: operatorToken!.value,
+            column,
+            operator,
             value: valueToken!.value,
         };
     }
