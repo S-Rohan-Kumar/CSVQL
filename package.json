@@ -1,26 +1,35 @@
 {
-  "name": "csvql",
+  "name": "csvql-cli",
   "version": "1.0.0",
   "description": "A mini SQL query engine for CSV and JSON files",
   "main": "dist/index.js",
   "bin": {
-    "csvql": "./dist/cli.js"
+    "csvql": "dist/cli.js"
   },
   "files": [
     "dist"
   ],
   "scripts": {
     "build": "tsc",
-    "start": "tsx src/cli.ts",
     "prepublishOnly": "npm run build"
   },
+  "keywords": [
+    "sql",
+    "csv",
+    "json",
+    "query-engine",
+    "parser",
+    "lexer",
+    "cli"
+  ],
+  "author": "S Rohan Kumar",
+  "license": "ISC",
   "devDependencies": {
     "@types/node": "^26.4.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3"
   },
   "dependencies": {
-    "commander": "^15.0.0",
-    "tsx": "^4.23.13"
+    "commander": "^15.0.0"
   }
 }
