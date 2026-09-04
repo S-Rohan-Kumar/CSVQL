@@ -3,6 +3,9 @@ export type TokenType =
     | "IDENTIFIER"
     | "COMMA"
     | "NUMBER"
+    | "LPAREN"
+    | "RPAREN"
+    | "ASTERISK"
     | "STRING"
     | "OPERATOR"
     | "EOF";
@@ -13,7 +16,7 @@ export interface Token {
 }
 
 function isIdentifierChar(char: string): boolean {
-    return /[a-zA-Z0-9.]/.test(char);
+    return /[a-zA-Z0-9./\\_-]/.test(char);
 }
 
 export function tokenize(input: string): Token[] {
@@ -33,9 +36,25 @@ export function tokenize(input: string): Token[] {
             continue;
         }
 
+        if (char === "(") {
+            tokens.push({ type: "LPAREN", value: "(" });
+            pos++;
+            continue;
+        }
+        if (char === ")") {
+            tokens.push({ type: "RPAREN", value: ")" });
+            pos++;
+            continue;
+        }
+        if (char === "*") {
+            tokens.push({ type: "ASTERISK", value: "*" });
+            pos++;
+            continue;
+        }
+
         if (char === "'" || char === '"') {
             const quoteChar = char;
-            pos++; 
+            pos++;
             const start = pos;
             while (pos < input.length && input[pos] !== quoteChar) {
                 pos++;
@@ -46,7 +65,7 @@ export function tokenize(input: string): Token[] {
                 );
             }
             const word = input.slice(start, pos);
-            pos++; 
+            pos++;
             tokens.push({ type: "STRING", value: word });
             continue;
         }
@@ -76,10 +95,32 @@ export function tokenize(input: string): Token[] {
             let start = pos;
             while (pos < input.length && isIdentifierChar(input[pos])) pos++;
             const word = input.slice(start, pos);
-            if (word === "SELECT" || word === "FROM" || word === "WHERE") {
-                tokens.push({ type: "KEYWORD", value: word });
+            const upperWord = word.toUpperCase();
+
+            const isKeyword =
+                upperWord === "SELECT" ||
+                upperWord === "FROM" ||
+                upperWord === "WHERE" ||
+                upperWord === "AND" ||
+                upperWord === "OR" ||
+                upperWord === "NOT" ||
+                upperWord === "IS" ||
+                upperWord === "GROUP" ||
+                upperWord === "BY" ||
+                upperWord === "HAVING" ||
+                upperWord === "ORDER" ||
+                upperWord === "LIMIT" ||
+                upperWord === "OFFSET" ||
+                upperWord === "ASC" ||
+                upperWord === "DESC" ||
+                upperWord === "COUNT" ||
+                upperWord === "SUM" ||
+                upperWord === "AVG";
+
+            if (isKeyword) {
+                tokens.push({ type: "KEYWORD", value: upperWord });
             } else {
-                tokens.push({ type: "IDENTIFIER", value: word });
+                tokens.push({ type: "IDENTIFIER", value: word }); 
             }
             continue;
         }

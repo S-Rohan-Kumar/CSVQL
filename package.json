@@ -1,17 +1,26 @@
 {
-  "name": "csv-sql",
+  "name": "csvql",
   "version": "1.0.0",
-  "description": "",
-  "license": "ISC",
-  "author": "",
-  "type": "commonjs",
-  "main": "index.js",
+  "description": "A mini SQL query engine for CSV and JSON files",
+  "main": "dist/index.js",
+  "bin": {
+    "csvql": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "start": "tsx src/cli.ts",
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "tsx": "^4.23.13"
   }
 }

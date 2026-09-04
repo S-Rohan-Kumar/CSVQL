@@ -1,16 +1,35 @@
 import { Token, TokenType } from "../lexer/tokenizer";
 
-export interface SelectQuery {
-    type: "SelectQuery";
-    columns: string[];
-    from: string;
-    where?: Condition;
+export interface AggregateCall {
+    type: "AggregateCall";
+    fn: "COUNT" | "SUM" | "AVG";
+    column: string;
 }
 
-export interface Condition {
+export type ColumnSelection = string | AggregateCall;
+
+export interface SelectQuery {
+    type: "SelectQuery";
+    columns: ColumnSelection[];
+    from: string;
+    where?: Condition;
+    groupBy?: string[];
+}
+
+export type Condition = SimpleCondition | ComplexCondition;
+
+export interface SimpleCondition {
+    type: "SimpleCondition";
     column: string;
     operator: string;
     value: string;
+}
+
+export interface ComplexCondition {
+    type: "ComplexCondition";
+    left: Condition;
+    operator: "AND" | "OR";
+    right: Condition;
 }
 
 class Parser {
@@ -38,16 +57,50 @@ class Parser {
         return this.tokens[this.pos++];
     }
 
-    private check(type: TokenType): boolean {
-        return this.peek()?.type === type;
+    private check(type: TokenType, value?: string): boolean {
+        const token = this.peek();
+        if (!token) return false;
+        if (token.type !== type) return false;
+        if (value && token.value !== value) return false;
+        return true;
     }
 
     parseSelectQuery(): SelectQuery {
         this.expect("KEYWORD", "SELECT");
-        const columns: string[] = [];
+        const columns: ColumnSelection[] = [];
+
         while (true) {
-            const colToken = this.expect("IDENTIFIER");
-            columns.push(colToken!.value);
+            const token = this.peek();
+            if (
+                token &&
+                token.type === "KEYWORD" &&
+                (token.value === "COUNT" ||
+                    token.value === "SUM" ||
+                    token.value === "AVG")
+            ) {
+                const fn = this.expect("KEYWORD")!.value as
+                    | "COUNT"
+                    | "SUM"
+                    | "AVG";
+                this.expect("LPAREN");
+
+                let colName: string;
+                if (this.check("ASTERISK")) {
+                    colName = this.expect("ASTERISK")!.value;
+                } else {
+                    colName = this.expect("IDENTIFIER")!.value;
+                }
+                this.expect("RPAREN");
+
+                columns.push({
+                    type: "AggregateCall",
+                    fn,
+                    column: colName,
+                });
+            } else {
+                const colToken = this.expect("IDENTIFIER");
+                columns.push(colToken!.value);
+            }
 
             if (this.check("COMMA")) {
                 this.expect("COMMA");
@@ -55,23 +108,53 @@ class Parser {
                 break;
             }
         }
+
         this.expect("KEYWORD", "FROM");
         const fromToken = this.expect("IDENTIFIER");
         const from = fromToken!.value;
 
         let where: Condition | undefined = undefined;
-        if (this.check("KEYWORD") && this.peek()?.value === "WHERE") {
+        if (this.check("KEYWORD", "WHERE")) {
             this.expect("KEYWORD", "WHERE");
             where = this.parseCondition();
         }
 
+        let groupBy: string[] | undefined = undefined;
+        if (this.check("KEYWORD", "GROUP")) {
+            this.expect("KEYWORD", "GROUP");
+            this.expect("KEYWORD", "BY");
+            const groupCol = this.expect("IDENTIFIER")!.value;
+            groupBy = [groupCol];
+        }
+
         this.expect("EOF");
-        return { type: "SelectQuery", columns, from, where };
+        return { type: "SelectQuery", columns, from, where, groupBy };
     }
 
     private parseCondition(): Condition {
+        let left: Condition = this.parseSimpleCondition();
+
+        while (
+            this.check("KEYWORD") &&
+            (this.peek()?.value === "AND" || this.peek()?.value === "OR")
+        ) {
+            const opToken = this.tokens[this.pos++];
+            const right = this.parseCondition();
+            left = {
+                type: "ComplexCondition",
+                left,
+                operator: opToken.value as "AND" | "OR",
+                right,
+            };
+        }
+
+        return left;
+    }
+
+    private parseSimpleCondition(): SimpleCondition {
         const columnToken = this.expect("IDENTIFIER");
         const operatorToken = this.expect("OPERATOR");
+
         const token = this.peek();
         if (!token) {
             throw new Error("Unexpected end of input in condition");
@@ -86,7 +169,9 @@ class Parser {
             );
         }
         const valueToken = this.tokens[this.pos++];
+
         return {
+            type: "SimpleCondition",
             column: columnToken!.value,
             operator: operatorToken!.value,
             value: valueToken!.value,
