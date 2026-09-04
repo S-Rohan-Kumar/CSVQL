@@ -3,6 +3,7 @@ import {
     Condition,
     AggregateCall,
     ColumnSelection,
+    RegularColumn,
 } from "../parser/parser";
 
 function matchLike(text: string, pattern: string): boolean {
@@ -23,7 +24,15 @@ function evaluateCondition(
         const targetVal = condition.value;
         const op = condition.operator;
 
-        if (op === "LIKE") {
+        if (op === "IN" && Array.isArray(targetVal)) {
+            return targetVal.includes(rowVal);
+        }
+
+        if (op === "NOT IN" && Array.isArray(targetVal)) {
+            return !targetVal.includes(rowVal);
+        }
+
+        if (op === "LIKE" && typeof targetVal === "string") {
             return matchLike(rowVal, targetVal);
         }
 
@@ -85,17 +94,24 @@ export function execute(
     query: SelectQuery,
     rows: Record<string, string>[],
 ): Record<string, string>[] {
+    const sourceRows =
+        typeof query.from === "string" ? rows : execute(query.from, rows);
+
     const filteredRows: Record<string, string>[] = [];
-    for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
+    for (let i = 0; i < sourceRows.length; i++) {
+        const row = sourceRows[i];
         if (query.where && !evaluateCondition(row, query.where)) {
             continue;
         }
         filteredRows.push(row);
     }
 
-    const hasAggregates = query.columns.some((col) => typeof col !== "string");
+    const hasAggregates = query.columns.some(
+        (col) => col.type === "AggregateCall",
+    );
     const hasGroupBy = query.groupBy && query.groupBy.length > 0;
+
+    let result: Record<string, string>[] = [];
 
     if (hasGroupBy || hasAggregates) {
         const groups = new Map<string, Record<string, string>[]>();
@@ -114,51 +130,111 @@ export function execute(
             groups.set("ALL", filteredRows);
         }
 
-        const result: Record<string, string>[] = [];
-
         groups.forEach((groupRows) => {
             if (groupRows.length === 0) return;
+
+            const evalContext: Record<string, string> = { ...groupRows[0] };
+
+            query.columns.forEach((col) => {
+                if (col.type === "AggregateCall") {
+                    const defaultLabel = `${col.fn}(${col.column})`;
+                    const computedVal = calculateAggregate(
+                        col.fn,
+                        col.column,
+                        groupRows,
+                    );
+                    evalContext[defaultLabel] = computedVal;
+                    if (col.alias) {
+                        evalContext[col.alias] = computedVal;
+                    }
+                }
+            });
+
+            if (query.having) {
+                const ensureHavingColumn = (cond: Condition) => {
+                    if (cond.type === "SimpleCondition") {
+                        if (evalContext[cond.column] === undefined) {
+                            const match = cond.column.match(
+                                /^(COUNT|SUM|AVG)\((.*)\)$/,
+                            );
+                            if (match) {
+                                const fn = match[1] as "COUNT" | "SUM" | "AVG";
+                                const arg = match[2];
+                                evalContext[cond.column] = calculateAggregate(
+                                    fn,
+                                    arg,
+                                    groupRows,
+                                );
+                            }
+                        }
+                    } else if (cond.type === "ComplexCondition") {
+                        ensureHavingColumn(cond.left);
+                        ensureHavingColumn(cond.right);
+                    }
+                };
+
+                ensureHavingColumn(query.having);
+
+                if (!evaluateCondition(evalContext, query.having)) {
+                    return;
+                }
+            }
 
             const resultRow: Record<string, string> = {};
 
             for (let i = 0; i < query.columns.length; i++) {
                 const col = query.columns[i];
 
-                if (typeof col === "string") {
-                    resultRow[col] = groupRows[0][col];
+                if (col.type === "Column") {
+                    const targetKey = col.alias || col.name;
+                    resultRow[targetKey] = groupRows[0][col.name];
                 } else {
-                    const aggregateCall = col as AggregateCall;
-                    const colLabel = `${aggregateCall.fn}(${aggregateCall.column})`;
-                    resultRow[colLabel] = calculateAggregate(
-                        aggregateCall.fn,
-                        aggregateCall.column,
-                        groupRows,
-                    );
+                    const defaultLabel = `${col.fn}(${col.column})`;
+                    const targetKey = col.alias || defaultLabel;
+                    resultRow[targetKey] = evalContext[defaultLabel];
                 }
             }
 
             result.push(resultRow);
         });
+    } else {
+        const isSelectAll =
+            query.columns.length === 1 &&
+            query.columns[0].type === "Column" &&
+            query.columns[0].name === "*";
 
-        return result;
+        for (let i = 0; i < filteredRows.length; i++) {
+            const row = filteredRows[i];
+
+            if (isSelectAll) {
+                result.push({ ...row });
+            } else {
+                const newRow: Record<string, string> = {};
+                for (let j = 0; j < query.columns.length; j++) {
+                    const col = query.columns[j] as RegularColumn;
+                    const targetKey = col.alias || col.name;
+                    newRow[targetKey] = row[col.name];
+                }
+                result.push(newRow);
+            }
+        }
     }
 
-    const result: Record<string, string>[] = [];
-    const isSelectAll = query.columns.length === 1 && query.columns[0] === "*";
+    if (query.orderBy) {
+        const { column, direction } = query.orderBy;
+        result.sort((a, b) => {
+            const valA = a[column] ?? "";
+            const valB = b[column] ?? "";
 
-    for (let i = 0; i < filteredRows.length; i++) {
-        const row = filteredRows[i];
-
-        if (isSelectAll) {
-            result.push({ ...row });
-        } else {
-            const newRow: Record<string, string> = {};
-            for (let j = 0; j < query.columns.length; j++) {
-                const col = query.columns[j] as string;
-                newRow[col] = row[col];
+            const numA = Number(valA);
+            const numB = Number(valB);
+            if (!isNaN(numA) && !isNaN(numB) && valA !== "" && valB !== "") {
+                return direction === "ASC" ? numA - numB : numB - numA;
             }
-            result.push(newRow);
-        }
+
+            const cmp = valA.localeCompare(valB);
+            return direction === "ASC" ? cmp : -cmp;
+        });
     }
 
     return result;

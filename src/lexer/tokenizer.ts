@@ -80,11 +80,17 @@ export function tokenize(input: string): Token[] {
             continue;
         }
 
-        if (char === ">" || char === "<" || char === "=") {
+        if (char === ">" || char === "<" || char === "=" || char === "!") {
             let op = char;
             pos++;
-            if (input[pos] === "=" && (op === ">" || op === "<")) {
+            if (
+                input[pos] === "=" &&
+                (op === ">" || op === "<" || op === "!")
+            ) {
                 op += "=";
+                pos++;
+            } else if (op === "<" && input[pos] === ">") {
+                op = "!=";
                 pos++;
             }
             tokens.push({ type: "OPERATOR", value: op });
@@ -116,7 +122,9 @@ export function tokenize(input: string): Token[] {
                 upperWord === "COUNT" ||
                 upperWord === "SUM" ||
                 upperWord === "AVG" ||
-                upperWord === "LIKE";
+                upperWord === "LIKE" ||
+                upperWord === "IN" ||
+                upperWord === "AS";
 
             if (isKeyword) {
                 tokens.push({ type: "KEYWORD", value: upperWord });

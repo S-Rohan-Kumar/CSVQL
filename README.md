@@ -1,23 +1,23 @@
 # csvql
 
-⚡ A mini SQL query engine for CSV and JSON files — no database setup, no import step. Point it at a file and query it directly.
+A lightweight SQL query engine for CSV and JSON files — no database setup, no import step. Point it at a file and query it directly.
 
 ```bash
-csvql "SELECT department, AVG(salary) FROM employees.csv WHERE age > 27 GROUP BY department"
+csvql "SELECT department, AVG(salary), COUNT(*) FROM employees.csv WHERE age > 27 GROUP BY department HAVING COUNT(*) > 1"
 ```
 
 ```
-department    | AVG(salary)
---------------|------------
-Engineering   | 103333.33
-Sales         | 80000
+department    | AVG(salary) | COUNT(*)
+--------------|-------------|---------
+Engineering   | 103333.33   | 3
+Sales         | 80000       | 2
 ```
 
 ---
 
 ## Why csvql
 
-Anyone who has a CSV or JSON file and wants to ask it a specific question — filter it, group it, aggregate it — usually has two options: open it in Excel, or spin up a real database just to answer one query. `csvql` skips both. It's a real query engine built from scratch: a tokenizer, a parser, and an execution engine that understands a practical subset of SQL and runs it directly against your file.
+Anyone who has a CSV or JSON file and wants to ask it a specific question — filter it, group it, aggregate it, sort it — usually has two options: open it in Excel, or spin up a real database just to answer one query. `csvql` skips both. It's a real query engine built from scratch: a tokenizer, a parser, and an execution engine that understands a practical subset of SQL and runs it directly against your file.
 
 It's aimed at data analysts, backend and DevOps engineers digging through log exports, and anyone doing quick ad-hoc data exploration from the command line.
 
@@ -26,7 +26,7 @@ It's aimed at data analysts, backend and DevOps engineers digging through log ex
 ## Installation
 
 ```bash
-npm install -g csvql
+npm install -g csvql-cli
 ```
 
 This installs the `csvql` command globally.
@@ -43,24 +43,29 @@ The query string references your data file directly in the `FROM` clause — no 
 
 ### Examples
 
-**Filter and select specific columns**
+**Wildcard and pattern matching**
 ```bash
-csvql "SELECT name, salary FROM employees.csv WHERE salary > 90000"
+csvql "SELECT * FROM classroom.csv WHERE First_Name LIKE 'A%'"
 ```
 
-**Group and aggregate**
+**Aliases, IN, and sorting**
 ```bash
-csvql "SELECT department, AVG(salary), COUNT(*) FROM employees.csv WHERE age > 27 GROUP BY department"
+csvql "SELECT First_Name AS student, Final_Project AS score FROM classroom.csv WHERE Final_Grade IN (A, B) ORDER BY score DESC"
+```
+
+**Group, aggregate, and filter the aggregated result**
+```bash
+csvql "SELECT department, AVG(salary), COUNT(*) FROM employees.csv WHERE age > 27 GROUP BY department HAVING COUNT(*) > 1"
+```
+
+**Subquery as a data source**
+```bash
+csvql "SELECT First_Name FROM (SELECT * FROM classroom.csv WHERE Final_Grade = A) WHERE Final_Project >= 94"
 ```
 
 **Query JSON just as easily as CSV**
 ```bash
 csvql "SELECT name, department FROM employees.json WHERE age <= 30"
-```
-
-**Combine conditions**
-```bash
-csvql "SELECT name FROM employees.csv WHERE department = 'Engineering' AND age > 30"
 ```
 
 ---
@@ -70,8 +75,8 @@ csvql "SELECT name FROM employees.csv WHERE department = 'Engineering' AND age >
 `csvql` is built as a real, small query engine — not a wrapper around string matching. Every query passes through four distinct stages:
 
 1. **Tokenizer** — turns the raw query string into a stream of tokens (keywords, identifiers, operators, literals).
-2. **Parser** — turns the token stream into an abstract syntax tree (AST) representing the query's structure: what to select, where to read from, how to filter, how to group.
-3. **Planner** — lays out a fixed, predictable execution order: load data → filter (`WHERE`) → group (`GROUP BY`) → aggregate → project (`SELECT`).
+2. **Parser** — turns the token stream into an abstract syntax tree (AST) representing the query's structure: what to select, where to read from, how to filter, how to group, how to sort.
+3. **Planner** — lays out a predictable execution order: load data (or execute a nested subquery) → filter (`WHERE`) → group (`GROUP BY`) → aggregate → filter groups (`HAVING`) → sort (`ORDER BY`) → project (`SELECT`).
 4. **Executor** — runs that plan against the parsed rows and produces the final result.
 
 This separation is deliberate. It keeps "understanding the query" and "running the query" as clean, independent concerns — the same design principle used in real database engines, scaled down to a learning-sized project.
@@ -83,12 +88,19 @@ This separation is deliberate. It keeps "understanding the query" and "running t
 | Clause | Support |
 |---|---|
 | `SELECT column, column, ...` | ✅ |
+| `SELECT *` | ✅ |
+| `SELECT column AS alias` | ✅ |
 | `SELECT COUNT(...)`, `SUM(...)`, `AVG(...)` | ✅ |
 | `SELECT COUNT(*)` | ✅ |
 | `FROM file.csv` / `FROM file.json` | ✅ |
-| `WHERE column = / > / < / >= / <= value` | ✅ |
+| `FROM (subquery)` | ✅ |
+| `WHERE column = / != / > / < / >= / <= value` | ✅ |
 | `WHERE ... AND ... OR ...` | ✅ |
+| `WHERE column LIKE 'prefix%'` / `'%suffix'` / `'%contains%'` | ✅ |
+| `WHERE column IN (val1, val2, ...)` / `NOT IN (...)` | ✅ |
 | `GROUP BY column` | ✅ |
+| `HAVING` (filter on aggregated results, e.g. `HAVING COUNT(*) > 1`) | ✅ |
+| `ORDER BY column ASC / DESC` | ✅ |
 | Case-insensitive keywords | ✅ |
 | Quoted string values (`'text'`, `"text"`) | ✅ |
 
@@ -96,12 +108,12 @@ This separation is deliberate. It keeps "understanding the query" and "running t
 
 ### Not yet supported
 
-- **`HAVING`** — filtering on aggregated results after `GROUP BY`. *Coming soon.*
-- Subqueries and JOINs across multiple files
-- `ORDER BY` / `LIMIT`
+- JOINs across multiple files
+- Correlated subqueries or subqueries inside `WHERE` (only `FROM (subquery)` is currently supported)
+- `LIMIT` / `OFFSET`
 - Full ANSI SQL compliance
 
-This project is under active development. The current release focuses on a correct, well-tested core subset of SQL — broader coverage is planned and will be added in upcoming releases.
+This project is under active development. The current release focuses on a correct, well-tested subset of SQL — broader coverage is planned and will be added in upcoming releases.
 
 ---
 
@@ -123,7 +135,7 @@ npm run build
 npm link
 ```
 
-
+---
 
 ## License
 

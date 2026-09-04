@@ -1,13 +1,18 @@
 import { tokenize } from "./lexer/tokenizer";
-import { parse } from "./parser/parser";
+import { parse, SelectQuery } from "./parser/parser";
 import { readDataFile } from "./engine/dataReader";
 import { execute } from "./engine/executor";
 import { formatTable } from "./output/tableFormatter";
+function getRootSourceFile(from: string | SelectQuery): string {
+    if (typeof from === "string") return from;
+    return getRootSourceFile(from.from);
+}
 
 export function query(sql: string): Record<string, string>[] {
     const tokens = tokenize(sql);
     const ast = parse(tokens);
-    const rows = readDataFile(ast.from);
+    const rootFile = getRootSourceFile(ast.from);
+    const rows = readDataFile(rootFile);
     return execute(ast, rows);
 }
 
