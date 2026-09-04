@@ -101,7 +101,7 @@ This separation is deliberate. It keeps "understanding the query" and "running t
 - `ORDER BY` / `LIMIT`
 - Full ANSI SQL compliance
 
-These are scoped out intentionally rather than left unfinished — the goal of this project is a correct, well-tested subset rather than broad but shaky SQL coverage.
+This project is under active development. The current release focuses on a correct, well-tested core subset of SQL — broader coverage is planned and will be added in upcoming releases.
 
 ---
 
@@ -123,12 +123,7 @@ npm run build
 npm link
 ```
 
-Run the test suite:
-```bash
-npm test
-```
 
----
 
 ## License
 
