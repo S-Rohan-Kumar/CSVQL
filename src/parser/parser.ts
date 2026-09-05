@@ -41,6 +41,8 @@ export interface SelectQuery {
     groupBy?: string[];
     having?: Condition;
     orderBy?: OrderByClause;
+    limit?: number;
+    offset?: number;
 }
 
 export type Condition = SimpleCondition | ComplexCondition;
@@ -49,7 +51,7 @@ export interface SimpleCondition {
     type: "SimpleCondition";
     column: string;
     operator: string;
-    value: string | string[];
+    value: string | string[] | SelectQuery;
 }
 
 export interface ComplexCondition {
@@ -181,6 +183,8 @@ class Parser {
             this.peek()!.value !== "LEFT" &&
             this.peek()!.value !== "GROUP" &&
             this.peek()!.value !== "ORDER" &&
+            this.peek()!.value !== "LIMIT" &&
+            this.peek()!.value !== "OFFSET" &&
             this.peek()!.value !== "HAVING"
         ) {
             fromAlias = this.expect("IDENTIFIER")!.value;
@@ -300,6 +304,18 @@ class Parser {
             orderBy = { column: orderCol, direction };
         }
 
+        let limit: number | undefined = undefined;
+        if (this.check("KEYWORD", "LIMIT")) {
+            this.expect("KEYWORD", "LIMIT");
+            limit = Number(this.expect("NUMBER")!.value);
+        }
+
+        let offset: number | undefined = undefined;
+        if (this.check("KEYWORD", "OFFSET")) {
+            this.expect("KEYWORD", "OFFSET");
+            offset = Number(this.expect("NUMBER")!.value);
+        }
+
         if (!isSubquery) {
             this.expect("EOF");
         }
@@ -314,6 +330,8 @@ class Parser {
             groupBy,
             having,
             orderBy,
+            limit,
+            offset,
         };
     }
 
@@ -365,7 +383,7 @@ class Parser {
         const opPeek = this.peek();
 
         if (opPeek && opPeek.type === "KEYWORD" && opPeek.value === "NOT") {
-            this.tokens[this.pos++]; // consume NOT
+            this.tokens[this.pos++];
             this.expect("KEYWORD", "IN");
             operator = "NOT IN";
         } else if (
@@ -386,47 +404,87 @@ class Parser {
             operator = operatorToken!.value;
         }
 
-        let value: string | string[];
+        let value: string | string[] | SelectQuery;
 
         if (operator === "IN" || operator === "NOT IN") {
             this.expect("LPAREN");
-            const values: string[] = [];
-            while (true) {
-                const token = this.peek();
+            const nextToken = this.peek();
+            if (
+                nextToken &&
+                nextToken.type === "KEYWORD" &&
+                nextToken.value === "SELECT"
+            ) {
+                const subQuery = this.parseSelectQuery(true);
+                this.expect("RPAREN");
+                value = subQuery;
+            } else {
+                const values: string[] = [];
+                while (true) {
+                    const token = this.peek();
+                    if (
+                        !token ||
+                        (token.type !== "NUMBER" &&
+                            token.type !== "STRING" &&
+                            token.type !== "IDENTIFIER")
+                    ) {
+                        throw new Error(
+                            `Unexpected token in IN clause: ${token?.value}`,
+                        );
+                    }
+                    values.push(this.tokens[this.pos++].value);
+                    if (this.check("COMMA")) {
+                        this.expect("COMMA");
+                    } else {
+                        break;
+                    }
+                }
+                this.expect("RPAREN");
+                value = values;
+            }
+        } else {
+            if (this.check("LPAREN")) {
+                const nextToken = this.tokens[this.pos + 1];
                 if (
-                    !token ||
-                    (token.type !== "NUMBER" &&
+                    nextToken &&
+                    nextToken.type === "KEYWORD" &&
+                    nextToken.value === "SELECT"
+                ) {
+                    this.expect("LPAREN");
+                    const subQuery = this.parseSelectQuery(true);
+                    this.expect("RPAREN");
+                    value = subQuery;
+                } else {
+                    const token = this.peek();
+                    if (!token) {
+                        throw new Error("Unexpected end of input in condition");
+                    }
+                    if (
+                        token.type !== "NUMBER" &&
                         token.type !== "STRING" &&
-                        token.type !== "IDENTIFIER")
+                        token.type !== "IDENTIFIER"
+                    ) {
+                        throw new Error(
+                            `Unexpected token ${token.type} ${token.value} for condition value`,
+                        );
+                    }
+                    value = this.tokens[this.pos++].value;
+                }
+            } else {
+                const token = this.peek();
+                if (!token) {
+                    throw new Error("Unexpected end of input in condition");
+                }
+                if (
+                    token.type !== "NUMBER" &&
+                    token.type !== "STRING" &&
+                    token.type !== "IDENTIFIER"
                 ) {
                     throw new Error(
-                        `Unexpected token in IN clause: ${token?.value}`,
+                        `Unexpected token ${token.type} ${token.value} for condition value`,
                     );
                 }
-                values.push(this.tokens[this.pos++].value);
-                if (this.check("COMMA")) {
-                    this.expect("COMMA");
-                } else {
-                    break;
-                }
+                value = this.tokens[this.pos++].value;
             }
-            this.expect("RPAREN");
-            value = values;
-        } else {
-            const token = this.peek();
-            if (!token) {
-                throw new Error("Unexpected end of input in condition");
-            }
-            if (
-                token.type !== "NUMBER" &&
-                token.type !== "STRING" &&
-                token.type !== "IDENTIFIER"
-            ) {
-                throw new Error(
-                    `Unexpected token ${token.type} ${token.value} for condition value`,
-                );
-            }
-            value = this.tokens[this.pos++].value;
         }
 
         return {

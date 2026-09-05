@@ -100,16 +100,19 @@ This separation is deliberate. It keeps "understanding the query" and "running t
 | `SELECT COUNT(*)` | Yes |
 | `FROM file.csv` / `FROM file.json` | Yes |
 | `FROM (subquery)` | Yes |
-| `FROM file1 alias1 JOIN file2 alias2 ON alias1.col = alias2.col` | Yes |
+| `JOIN` / `LEFT JOIN` (multi-table chained joins) | Yes |
 | Qualified column references (`alias.column`) | Yes |
 | `WHERE column = / != / > / < / >= / <= value` | Yes |
 | `WHERE ... AND ... OR ...` | Yes |
 | `WHERE column LIKE 'prefix%'` / `'%suffix'` / `'%contains%'` | Yes |
 | `WHERE column IN (val1, val2, ...)` / `NOT IN (...)` | Yes |
+| `WHERE column [op] (SELECT ...)` (scalar subqueries) | Yes |
+| `WHERE column IN (SELECT ...)` (subquery lists) | Yes |
 | `GROUP BY column` | Yes |
 | `HAVING` (filter on aggregated results, e.g. `HAVING COUNT(*) > 1`) | Yes |
 | `ORDER BY column ASC / DESC` | Yes |
-| `ORDER BY` on a raw aggregate expression (e.g. `ORDER BY AVG(salary) DESC`) | Yes |
+| `ORDER BY` on raw aggregate expression (e.g. `ORDER BY AVG(salary) DESC`) | Yes |
+| `LIMIT n` and `OFFSET m` | Yes |
 | Case-insensitive keywords | Yes |
 | Quoted string values (`'text'`, `"text"`) | Yes |
 
@@ -117,9 +120,9 @@ This separation is deliberate. It keeps "understanding the query" and "running t
 
 ### Not yet supported
 
-- Joining more than two files in a single query
-- Correlated subqueries or subqueries inside `WHERE` (only `FROM (subquery)` is currently supported)
-- `LIMIT` / `OFFSET`
+- Correlated subqueries
+- Window functions & CTEs (`WITH`)
+- Transactions / DDL (`INSERT`, `UPDATE`, `CREATE`)
 - Full ANSI SQL compliance
 
 This project is under active development. The current release focuses on a correct, well-tested subset of SQL — broader coverage is planned and will be added in upcoming releases.

@@ -1,6 +1,6 @@
 {
     "name": "csvql-cli",
-    "version": "2.0.0",
+    "version": "3.2.1",
     "description": "A mini SQL query engine for CSV and JSON files",
     "main": "dist/index.js",
     "bin": {

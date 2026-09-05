@@ -8,6 +8,11 @@ import {
 } from "../parser/parser";
 import { readDataFile } from "./dataReader";
 
+function getRootSourceFile(from: string | SelectQuery): string {
+    if (typeof from === "string") return from;
+    return getRootSourceFile(from.from);
+}
+
 function matchLike(text: string, pattern: string): boolean {
     if (text === null || text === undefined) return false;
     const escaped = pattern
@@ -35,8 +40,31 @@ function evaluateCondition(
 ): boolean {
     if (condition.type === "SimpleCondition") {
         const rowVal = getFieldValue(row, condition.column);
-        const targetVal = condition.value;
+        let targetVal = condition.value;
         const op = condition.operator;
+
+        if (
+            typeof targetVal === "object" &&
+            targetVal !== null &&
+            !Array.isArray(targetVal)
+        ) {
+            const subQuery = targetVal as SelectQuery;
+            const subFile = getRootSourceFile(subQuery.from);
+            const subRows = readDataFile(subFile);
+            const subResult = execute(subQuery, subRows);
+
+            if (op === "IN") {
+                const list = subResult.map((r) => Object.values(r)[0]);
+                return list.includes(rowVal);
+            }
+            if (op === "NOT IN") {
+                const list = subResult.map((r) => Object.values(r)[0]);
+                return !list.includes(rowVal);
+            }
+
+            targetVal =
+                subResult.length > 0 ? Object.values(subResult[0])[0] : "";
+        }
 
         if (op === "IN" && Array.isArray(targetVal)) {
             return targetVal.includes(rowVal);
@@ -347,6 +375,12 @@ export function execute(
             const cmp = valA.localeCompare(valB);
             return direction === "ASC" ? cmp : -cmp;
         });
+    }
+
+    if (query.offset !== undefined || query.limit !== undefined) {
+        const start = query.offset ?? 0;
+        const end = query.limit !== undefined ? start + query.limit : undefined;
+        result = result.slice(start, end);
     }
 
     return result;
