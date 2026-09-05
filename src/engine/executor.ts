@@ -4,7 +4,9 @@ import {
     AggregateCall,
     ColumnSelection,
     RegularColumn,
+    JoinClause,
 } from "../parser/parser";
+import { readDataFile } from "./dataReader";
 
 function matchLike(text: string, pattern: string): boolean {
     if (text === null || text === undefined) return false;
@@ -15,12 +17,24 @@ function matchLike(text: string, pattern: string): boolean {
     return new RegExp(`^${escaped}$`, "i").test(text);
 }
 
+function getFieldValue(row: Record<string, string>, colName: string): string {
+    if (row[colName] !== undefined) return row[colName];
+    const bare = colName.split(".").pop()!;
+    if (row[bare] !== undefined) return row[bare];
+    for (const key of Object.keys(row)) {
+        if (key.endsWith(`.${colName}`) || key.endsWith(`.${bare}`)) {
+            return row[key];
+        }
+    }
+    return "";
+}
+
 function evaluateCondition(
     row: Record<string, string>,
     condition: Condition,
 ): boolean {
     if (condition.type === "SimpleCondition") {
-        const rowVal = row[condition.column];
+        const rowVal = getFieldValue(row, condition.column);
         const targetVal = condition.value;
         const op = condition.operator;
 
@@ -74,7 +88,8 @@ function calculateAggregate(
     if (fn === "SUM" || fn === "AVG") {
         let sum = 0;
         for (let i = 0; i < groupRows.length; i++) {
-            sum += Number(groupRows[i][column] || 0);
+            const val = getFieldValue(groupRows[i], column);
+            sum += Number(val || 0);
         }
 
         if (fn === "SUM") {
@@ -94,8 +109,102 @@ export function execute(
     query: SelectQuery,
     rows: Record<string, string>[],
 ): Record<string, string>[] {
-    const sourceRows =
+    let sourceRows =
         typeof query.from === "string" ? rows : execute(query.from, rows);
+
+    if (query.joins && query.joins.length > 0) {
+        const fromTableName =
+            typeof query.from === "string" ? query.from : "subquery";
+        const fromBaseName =
+            fromTableName
+                .split("/")
+                .pop()
+                ?.replace(/\.(csv|json)$/i, "") || fromTableName;
+        const leftPrefixes = [
+            query.fromAlias,
+            fromBaseName,
+            fromTableName,
+        ].filter(Boolean) as string[];
+
+        let currentRows: Record<string, string>[] = sourceRows.map((row) => {
+            const enriched: Record<string, string> = { ...row };
+            for (const key of Object.keys(row)) {
+                for (const prefix of leftPrefixes) {
+                    enriched[`${prefix}.${key}`] = row[key];
+                }
+            }
+            return enriched;
+        });
+
+        for (const join of query.joins) {
+            const rightRowsRaw = readDataFile(join.table);
+            const joinBaseName =
+                join.table
+                    .split("/")
+                    .pop()
+                    ?.replace(/\.(csv|json)$/i, "") || join.table;
+            const rightPrefixes = [join.alias, joinBaseName, join.table].filter(
+                Boolean,
+            ) as string[];
+
+            const rightRowsEnriched = rightRowsRaw.map((row) => {
+                const enriched: Record<string, string> = { ...row };
+                for (const key of Object.keys(row)) {
+                    for (const prefix of rightPrefixes) {
+                        enriched[`${prefix}.${key}`] = row[key];
+                    }
+                }
+                return enriched;
+            });
+
+            let leftColSpec = join.on.leftColumn;
+            let rightColSpec = join.on.rightColumn;
+            if (
+                rightRowsEnriched.length > 0 &&
+                currentRows.length > 0 &&
+                getFieldValue(rightRowsEnriched[0], leftColSpec) !== "" &&
+                getFieldValue(currentRows[0], rightColSpec) !== "" &&
+                getFieldValue(currentRows[0], leftColSpec) === ""
+            ) {
+                const tmp = leftColSpec;
+                leftColSpec = rightColSpec;
+                rightColSpec = tmp;
+            }
+
+            const map = new Map<string, Record<string, string>[]>();
+            for (const rRow of rightRowsEnriched) {
+                const val = getFieldValue(rRow, rightColSpec);
+                if (!map.has(val)) {
+                    map.set(val, []);
+                }
+                map.get(val)!.push(rRow);
+            }
+
+            const nextRows: Record<string, string>[] = [];
+            for (const lRow of currentRows) {
+                const lVal = getFieldValue(lRow, leftColSpec);
+                const matches = map.get(lVal);
+
+                if (matches && matches.length > 0) {
+                    for (const rRow of matches) {
+                        nextRows.push({ ...rRow, ...lRow });
+                    }
+                } else if (join.type === "LEFT") {
+                    const emptyRight: Record<string, string> = {};
+                    if (rightRowsEnriched.length > 0) {
+                        for (const k of Object.keys(rightRowsEnriched[0])) {
+                            emptyRight[k] = "";
+                        }
+                    }
+                    nextRows.push({ ...emptyRight, ...lRow });
+                }
+            }
+
+            currentRows = nextRows;
+        }
+
+        sourceRows = currentRows;
+    }
 
     const filteredRows: Record<string, string>[] = [];
     for (let i = 0; i < sourceRows.length; i++) {
@@ -120,7 +229,7 @@ export function execute(
             const groupCol = query.groupBy[0];
             for (let i = 0; i < filteredRows.length; i++) {
                 const row = filteredRows[i];
-                const key = row[groupCol] || "";
+                const key = getFieldValue(row, groupCol);
                 if (!groups.has(key)) {
                     groups.set(key, []);
                 }
@@ -187,7 +296,10 @@ export function execute(
 
                 if (col.type === "Column") {
                     const targetKey = col.alias || col.name;
-                    resultRow[targetKey] = groupRows[0][col.name];
+                    resultRow[targetKey] = getFieldValue(
+                        groupRows[0],
+                        col.name,
+                    );
                 } else {
                     const defaultLabel = `${col.fn}(${col.column})`;
                     const targetKey = col.alias || defaultLabel;
@@ -213,7 +325,7 @@ export function execute(
                 for (let j = 0; j < query.columns.length; j++) {
                     const col = query.columns[j] as RegularColumn;
                     const targetKey = col.alias || col.name;
-                    newRow[targetKey] = row[col.name];
+                    newRow[targetKey] = getFieldValue(row, col.name);
                 }
                 result.push(newRow);
             }
@@ -223,8 +335,8 @@ export function execute(
     if (query.orderBy) {
         const { column, direction } = query.orderBy;
         result.sort((a, b) => {
-            const valA = a[column] ?? "";
-            const valB = b[column] ?? "";
+            const valA = getFieldValue(a, column);
+            const valB = getFieldValue(b, column);
 
             const numA = Number(valA);
             const numB = Number(valB);

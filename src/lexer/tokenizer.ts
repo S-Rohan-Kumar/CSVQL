@@ -124,7 +124,11 @@ export function tokenize(input: string): Token[] {
                 upperWord === "AVG" ||
                 upperWord === "LIKE" ||
                 upperWord === "IN" ||
-                upperWord === "AS";
+                upperWord === "AS" ||
+                upperWord === "JOIN" ||
+                upperWord === "INNER" ||
+                upperWord === "LEFT" ||
+                upperWord === "ON";
 
             if (isKeyword) {
                 tokens.push({ type: "KEYWORD", value: upperWord });

@@ -3,21 +3,22 @@
 A lightweight SQL query engine for CSV and JSON files — no database setup, no import step. Point it at a file and query it directly.
 
 ```bash
-csvql "SELECT department, AVG(salary), COUNT(*) FROM employees.csv WHERE age > 27 GROUP BY department HAVING COUNT(*) > 1"
+csvql "SELECT d.dept_name, AVG(e.salary), COUNT(*) FROM employees.csv e JOIN departments.csv d ON e.dept_id = d.id GROUP BY d.dept_name ORDER BY AVG(e.salary) DESC"
 ```
 
 ```
-department    | AVG(salary) | COUNT(*)
---------------|-------------|---------
-Engineering   | 103333.33   | 3
-Sales         | 80000       | 2
+d.dept_name | AVG(e.salary) | COUNT(*)
+------------|---------------|---------
+Marketing   | 110000        | 1
+Engineering | 100000        | 2
+Sales       | 76000         | 2
 ```
 
 ---
 
 ## Why csvql
 
-Anyone who has a CSV or JSON file and wants to ask it a specific question — filter it, group it, aggregate it, sort it — usually has two options: open it in Excel, or spin up a real database just to answer one query. `csvql` skips both. It's a real query engine built from scratch: a tokenizer, a parser, and an execution engine that understands a practical subset of SQL and runs it directly against your file.
+Anyone who has a CSV or JSON file and wants to ask it a specific question — filter it, group it, aggregate it, sort it, even join it against a second file — usually has two options: open it in Excel, or spin up a real database just to answer one query. `csvql` skips both. It's a real query engine built from scratch: a tokenizer, a parser, and an execution engine that understands a practical subset of SQL and runs it directly against your files.
 
 It's aimed at data analysts, backend and DevOps engineers digging through log exports, and anyone doing quick ad-hoc data exploration from the command line.
 
@@ -39,7 +40,7 @@ This installs the `csvql` command globally.
 csvql "<SQL query>"
 ```
 
-The query string references your data file directly in the `FROM` clause — no import, no setup.
+The query string references your data file(s) directly in the `FROM` clause — no import, no setup.
 
 ### Examples
 
@@ -63,6 +64,11 @@ csvql "SELECT department, AVG(salary), COUNT(*) FROM employees.csv WHERE age > 2
 csvql "SELECT First_Name FROM (SELECT * FROM classroom.csv WHERE Final_Grade = A) WHERE Final_Project >= 94"
 ```
 
+**Join two files, aggregate across them, and sort by the aggregate**
+```bash
+csvql "SELECT d.dept_name, AVG(e.salary), COUNT(*) FROM employees.csv e JOIN departments.csv d ON e.dept_id = d.id GROUP BY d.dept_name ORDER BY AVG(e.salary) DESC"
+```
+
 **Query JSON just as easily as CSV**
 ```bash
 csvql "SELECT name, department FROM employees.json WHERE age <= 30"
@@ -75,8 +81,8 @@ csvql "SELECT name, department FROM employees.json WHERE age <= 30"
 `csvql` is built as a real, small query engine — not a wrapper around string matching. Every query passes through four distinct stages:
 
 1. **Tokenizer** — turns the raw query string into a stream of tokens (keywords, identifiers, operators, literals).
-2. **Parser** — turns the token stream into an abstract syntax tree (AST) representing the query's structure: what to select, where to read from, how to filter, how to group, how to sort.
-3. **Planner** — lays out a predictable execution order: load data (or execute a nested subquery) → filter (`WHERE`) → group (`GROUP BY`) → aggregate → filter groups (`HAVING`) → sort (`ORDER BY`) → project (`SELECT`).
+2. **Parser** — turns the token stream into an abstract syntax tree (AST) representing the query's structure: what to select, where to read from, how to join, how to filter, how to group, how to sort.
+3. **Planner** — lays out a predictable execution order: load data (or execute a nested subquery, or join two data sources) → filter (`WHERE`) → group (`GROUP BY`) → aggregate → filter groups (`HAVING`) → sort (`ORDER BY`) → project (`SELECT`).
 4. **Executor** — runs that plan against the parsed rows and produces the final result.
 
 This separation is deliberate. It keeps "understanding the query" and "running the query" as clean, independent concerns — the same design principle used in real database engines, scaled down to a learning-sized project.
@@ -87,28 +93,31 @@ This separation is deliberate. It keeps "understanding the query" and "running t
 
 | Clause | Support |
 |---|---|
-| `SELECT column, column, ...` | ✅ |
-| `SELECT *` | ✅ |
-| `SELECT column AS alias` | ✅ |
-| `SELECT COUNT(...)`, `SUM(...)`, `AVG(...)` | ✅ |
-| `SELECT COUNT(*)` | ✅ |
-| `FROM file.csv` / `FROM file.json` | ✅ |
-| `FROM (subquery)` | ✅ |
-| `WHERE column = / != / > / < / >= / <= value` | ✅ |
-| `WHERE ... AND ... OR ...` | ✅ |
-| `WHERE column LIKE 'prefix%'` / `'%suffix'` / `'%contains%'` | ✅ |
-| `WHERE column IN (val1, val2, ...)` / `NOT IN (...)` | ✅ |
-| `GROUP BY column` | ✅ |
-| `HAVING` (filter on aggregated results, e.g. `HAVING COUNT(*) > 1`) | ✅ |
-| `ORDER BY column ASC / DESC` | ✅ |
-| Case-insensitive keywords | ✅ |
-| Quoted string values (`'text'`, `"text"`) | ✅ |
+| `SELECT column, column, ...` | Yes |
+| `SELECT *` | Yes |
+| `SELECT column AS alias` | Yes |
+| `SELECT COUNT(...)`, `SUM(...)`, `AVG(...)` | Yes |
+| `SELECT COUNT(*)` | Yes |
+| `FROM file.csv` / `FROM file.json` | Yes |
+| `FROM (subquery)` | Yes |
+| `FROM file1 alias1 JOIN file2 alias2 ON alias1.col = alias2.col` | Yes |
+| Qualified column references (`alias.column`) | Yes |
+| `WHERE column = / != / > / < / >= / <= value` | Yes |
+| `WHERE ... AND ... OR ...` | Yes |
+| `WHERE column LIKE 'prefix%'` / `'%suffix'` / `'%contains%'` | Yes |
+| `WHERE column IN (val1, val2, ...)` / `NOT IN (...)` | Yes |
+| `GROUP BY column` | Yes |
+| `HAVING` (filter on aggregated results, e.g. `HAVING COUNT(*) > 1`) | Yes |
+| `ORDER BY column ASC / DESC` | Yes |
+| `ORDER BY` on a raw aggregate expression (e.g. `ORDER BY AVG(salary) DESC`) | Yes |
+| Case-insensitive keywords | Yes |
+| Quoted string values (`'text'`, `"text"`) | Yes |
 
 `csvql` is a deliberate subset of SQL, not a full implementation. It's built to genuinely understand how a query engine works internally — parsing, planning, execution — the same spirit as building a distributed cache to understand Redis rather than to replace it. Tools like [`q`](https://harelba.github.io/q/) and [DuckDB](https://duckdb.org/) already solve this problem in production, and are the right choice for real workloads.
 
 ### Not yet supported
 
-- JOINs across multiple files
+- Joining more than two files in a single query
 - Correlated subqueries or subqueries inside `WHERE` (only `FROM (subquery)` is currently supported)
 - `LIMIT` / `OFFSET`
 - Full ANSI SQL compliance

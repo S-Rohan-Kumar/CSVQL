@@ -20,10 +20,23 @@ export interface OrderByClause {
     direction: "ASC" | "DESC";
 }
 
+export interface JoinClause {
+    type: "INNER" | "LEFT";
+    table: string;
+    alias?: string;
+    on: {
+        leftColumn: string;
+        operator: string;
+        rightColumn: string;
+    };
+}
+
 export interface SelectQuery {
     type: "SelectQuery";
     columns: ColumnSelection[];
     from: string | SelectQuery;
+    fromAlias?: string;
+    joins?: JoinClause[];
     where?: Condition;
     groupBy?: string[];
     having?: Condition;
@@ -144,14 +157,87 @@ class Parser {
 
         this.expect("KEYWORD", "FROM");
 
-        let from: string | SelectQuery;
+        let fromTokenVal: string | SelectQuery;
         if (this.check("LPAREN")) {
             this.expect("LPAREN");
-            from = this.parseSelectQuery(true);
+            fromTokenVal = this.parseSelectQuery(true);
             this.expect("RPAREN");
         } else {
             const fromToken = this.expect("IDENTIFIER");
-            from = fromToken!.value;
+            fromTokenVal = fromToken!.value;
+        }
+        const from = fromTokenVal;
+
+        let fromAlias: string | undefined = undefined;
+        if (this.check("KEYWORD", "AS")) {
+            this.expect("KEYWORD", "AS");
+            fromAlias = this.expect("IDENTIFIER")!.value;
+        } else if (
+            this.peek() &&
+            this.peek()!.type === "IDENTIFIER" &&
+            this.peek()!.value !== "WHERE" &&
+            this.peek()!.value !== "JOIN" &&
+            this.peek()!.value !== "INNER" &&
+            this.peek()!.value !== "LEFT" &&
+            this.peek()!.value !== "GROUP" &&
+            this.peek()!.value !== "ORDER" &&
+            this.peek()!.value !== "HAVING"
+        ) {
+            fromAlias = this.expect("IDENTIFIER")!.value;
+        }
+
+        const joins: JoinClause[] = [];
+        while (
+            this.check("KEYWORD", "JOIN") ||
+            this.check("KEYWORD", "INNER") ||
+            this.check("KEYWORD", "LEFT")
+        ) {
+            let joinType: "INNER" | "LEFT" = "INNER";
+            if (this.check("KEYWORD", "LEFT")) {
+                this.expect("KEYWORD", "LEFT");
+                if (this.check("KEYWORD", "JOIN")) {
+                    this.expect("KEYWORD", "JOIN");
+                }
+                joinType = "LEFT";
+            } else if (this.check("KEYWORD", "INNER")) {
+                this.expect("KEYWORD", "INNER");
+                this.expect("KEYWORD", "JOIN");
+                joinType = "INNER";
+            } else {
+                this.expect("KEYWORD", "JOIN");
+                joinType = "INNER";
+            }
+
+            const tableToken = this.expect("IDENTIFIER");
+            const joinTable = tableToken!.value;
+
+            let joinAlias: string | undefined = undefined;
+            if (this.check("KEYWORD", "AS")) {
+                this.expect("KEYWORD", "AS");
+                joinAlias = this.expect("IDENTIFIER")!.value;
+            } else if (
+                this.peek() &&
+                this.peek()!.type === "IDENTIFIER" &&
+                this.peek()!.value !== "ON"
+            ) {
+                joinAlias = this.expect("IDENTIFIER")!.value;
+            }
+
+            this.expect("KEYWORD", "ON");
+            const leftCol = this.expect("IDENTIFIER")!.value;
+            const op = this.expect("OPERATOR")!.value;
+            const rightCol = this.expect("IDENTIFIER")!.value;
+
+            joins.push({
+                type: joinType,
+                table: joinTable,
+                alias: joinAlias,
+                on: {
+                    leftColumn: leftCol,
+                    operator: op,
+                    rightColumn: rightCol,
+                },
+            });
         }
 
         let where: Condition | undefined = undefined;
@@ -222,6 +308,8 @@ class Parser {
             type: "SelectQuery",
             columns,
             from,
+            fromAlias,
+            joins: joins.length > 0 ? joins : undefined,
             where,
             groupBy,
             having,
